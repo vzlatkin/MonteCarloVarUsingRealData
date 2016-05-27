@@ -19,10 +19,10 @@ import java.io.IOException;
 /**
  * Created by Vlad on 1/4/2016.
  */
-public class MainTest {
+public class UnitTest {
 
     // Logger
-    private static final Logger LOG = LoggerFactory.getLogger(MainTest.class);
+    private static final Logger LOG = LoggerFactory.getLogger(UnitTest.class);
     private static HdfsLocalCluster dfsCluster;
     private static FileSystem hdfsFsHandle;
     private static Main m;
@@ -69,7 +69,8 @@ public class MainTest {
     public static void tearDown() throws Exception {
         hdfsFsHandle.close();
         dfsCluster.stop();
-    }
+        m.close();
+       }
 
 
     @Test
@@ -85,7 +86,7 @@ public class MainTest {
                 "1990-01-03,x,x,x,x,x,x,BPL,-1\n");
         writer.close();
 
-        Object r = m.run(new String[]{MainTest.class.getClassLoader().getResource("companies_list_test_1.txt").toURI().getPath(), "hdfs://localhost:20112/tmp/stockData/*.csv"});
+        Object r = m.run(new String[]{UnitTest.class.getClassLoader().getResource("companies_list_test_1.txt").toURI().getPath(), "hdfs://localhost:20112/tmp/stockData/*.csv"});
         Assert.assertEquals("var simulation gave the wrong answer using single stock run", -1.0, (Float) r, 0.001);
     }
 
@@ -105,7 +106,7 @@ public class MainTest {
                 "1990-01-06,x,x,x,x,x,x,BPL,-2\n");
         writer.close();
 
-        Object r = m.run(new String[]{MainTest.class.getClassLoader().getResource("companies_list_test_1.txt").toURI().getPath(), "hdfs://localhost:20112/tmp/stockData/*.csv"});
+        Object r = m.run(new String[]{UnitTest.class.getClassLoader().getResource("companies_list_test_1.txt").toURI().getPath(), "hdfs://localhost:20112/tmp/stockData/*.csv"});
         Assert.assertEquals("var simulation gave the wrong answer", -2.0, (Float) r, 0.001);
     }
 
@@ -133,7 +134,7 @@ public class MainTest {
                 "1990-01-06,x,x,x,x,x,x,AAPL,-4\n");
         writer.close();
 
-        Object r = m.run(new String[]{MainTest.class.getClassLoader().getResource("companies_list_test_3.txt").toURI().getPath(), "hdfs://localhost:20112/tmp/stockData/*.csv"});
+        Object r = m.run(new String[]{UnitTest.class.getClassLoader().getResource("companies_list_test_3.txt").toURI().getPath(), "hdfs://localhost:20112/tmp/stockData/*.csv"});
         Assert.assertEquals("var simulation gave the wrong answer", -3.5, (Float) r, 0.001);
     }
 
@@ -155,7 +156,7 @@ public class MainTest {
                 "1990-01-05,x,x,x,x,x,x,AAPL,-4\n");
         writer.close();
 
-        Object r = m.run(new String[]{MainTest.class.getClassLoader().getResource("companies_list_test_3.txt").toURI().getPath(), "hdfs://localhost:20112/tmp/stockData/*.csv"});
+        Object r = m.run(new String[]{UnitTest.class.getClassLoader().getResource("companies_list_test_3.txt").toURI().getPath(), "hdfs://localhost:20112/tmp/stockData/*.csv"});
         Assert.assertEquals("var simulation gave the wrong answer", "No trade data", r);
     }
 }

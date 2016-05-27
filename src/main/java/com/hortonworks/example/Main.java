@@ -4,10 +4,18 @@ import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
+import org.apache.spark.sql.DataFrame;
+import org.apache.spark.sql.Row;
+import org.apache.spark.sql.RowFactory;
+import org.apache.spark.sql.hive.HiveContext;
+import org.apache.spark.sql.types.DataTypes;
+import org.apache.spark.sql.types.StructField;
+import org.apache.spark.sql.types.StructType;
 import scala.Tuple2;
 
 import java.io.File;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -20,9 +28,19 @@ import java.util.Map;
  * add broadcast code
  */
 public class Main {
+
+    private static JavaSparkContext sc = null;
+    private static HiveContext sqlContext = null;
+
+
     public static void main(String[] args) throws Exception {
         Main m = new Main();
         m.run(args);
+        m.close();
+    }
+
+    void close() {
+        sc.stop();
     }
 
     Object run(String[] args) {
@@ -39,15 +57,18 @@ public class Main {
         if (args.length > 1) {
             stockDataDir = args[1];
         }
+        if (sc == null) {
+            SparkConf conf = new SparkConf().setAppName("monte-carlo-var-calculator");
+            sc = new JavaSparkContext(conf);
+            sqlContext = new HiveContext(sc);
+        }
 
-        SparkConf conf = new SparkConf().setAppName("monte-carlo-var-calculator");
-        JavaSparkContext sc = new JavaSparkContext(conf);
 
         /*
         read a list of stock symbols and their weights in the portfolio, then transform into a Map<Symbol,Weight>
         */
         JavaRDD<String> filteredFileRDD = sc.textFile(listOfCompanies).filter(s -> !s.startsWith("#") && !s.trim().isEmpty());
-        JavaPairRDD<String, Float> symbolsAndWeightsRDD = filteredFileRDD.filter(s->!s.startsWith("Symbol")).mapToPair(s ->
+        JavaPairRDD<String, Float> symbolsAndWeightsRDD = filteredFileRDD.filter(s -> !s.startsWith("Symbol")).mapToPair(s ->
         {
             String[] splits = s.split(",", -2);
             return new Tuple2<>(splits[0], new Float(splits[1]));
@@ -55,8 +76,8 @@ public class Main {
         Map<String, Float> symbolsAndWeights = symbolsAndWeightsRDD.collectAsMap();
 
         //debug
-        System.out.println("companies and their weights in the overall portfolio");
-        symbolsAndWeightsRDD.foreach(t -> System.out.println("s:" + t._1() + " w: " + t._2()));
+        //System.out.println("companies and their weights in the overall portfolio");
+        //symbolsAndWeightsRDD.take(10).forEach(t -> System.out.println("s:" + t._1() + " w: " + t._2()));
 
         /*
         read all stock trading data, and transform
@@ -78,12 +99,12 @@ public class Main {
             return Collections.singletonList(new Tuple2<>(date, new Tuple2<>(symbol, changeInPrice)));
         });
         //debug
-        datesToSymbolsAndChangeRDD.take(10).forEach(x -> System.out.println(x._1() + "->" + x._2()));
+        //datesToSymbolsAndChangeRDD.take(10).forEach(x -> System.out.println(x._1() + "->" + x._2()));
 
         //2. reduce by key to get all dates together
         JavaPairRDD<String, Iterable<Tuple2>> groupedDatesToSymbolsAndChangeRDD = datesToSymbolsAndChangeRDD.groupByKey();
         //debug
-        groupedDatesToSymbolsAndChangeRDD.take(10).forEach(x -> System.out.println(x._1() + "->" + x._2()));
+        //groupedDatesToSymbolsAndChangeRDD.take(10).forEach(x -> System.out.println(x._1() + "->" + x._2()));
 
         //3. filter every date that doesn't have the max number of symbols
         long numSymbols = symbolsAndWeightsRDD.count();
@@ -91,8 +112,8 @@ public class Main {
         JavaPairRDD<String, Iterable<Tuple2>> filterdDatesToSymbolsAndChangeRDD = groupedDatesToSymbolsAndChangeRDD.filter(x -> (Long) countsByDate.get(x._1()) >= numSymbols);
         long numEvents = filterdDatesToSymbolsAndChangeRDD.count();
         //debug
-        System.out.println("num symbols: " + numSymbols);
-        filterdDatesToSymbolsAndChangeRDD.take(10).forEach(x -> System.out.println(x._1() + "->" + x._2()));
+        //System.out.println("num symbols: " + numSymbols);
+        //filterdDatesToSymbolsAndChangeRDD.take(10).forEach(x -> System.out.println(x._1() + "->" + x._2()));
 
         if (numEvents < 1) {
             System.out.println("No trade data");
@@ -105,7 +126,6 @@ public class Main {
         2. sum(stock weight in overall portfolio * change in price on that date)
          */
         double fraction = 1.0 * NUM_TRIALS / numEvents;
-        System.out.println("fraction: " + fraction);
         JavaRDD<Float> resultOfTrials = filterdDatesToSymbolsAndChangeRDD.sample(true, fraction).map(i -> {
             Float total = 0f;
             for (Tuple2 t : i._2()) {
@@ -121,15 +141,35 @@ public class Main {
             return total;
         });
         //debug
-        System.out.println("total runs: " + resultOfTrials.count());
-        resultOfTrials.take(10).forEach(System.out::println);
+        //System.out.println("fraction: " + fraction);
+        //System.out.println("total runs: " + resultOfTrials.count());
+        //resultOfTrials.take(10).forEach(System.out::println);
 
-        Float result = resultOfTrials.takeOrdered(Math.max(NUM_TRIALS / 20, 1)).get(0);
-        System.out.println("With a 95% certainty, you won't lose more than " + result
-                + "% in a single day");
+        /*
+        create a temporary table out of the data and take the 5%, 50%, and 95% percentiles
 
-        sc.stop();
+        1. multiple each float by 100
+        2. create an RDD with Row types
+        3. Create a schema
+        4. Use that schema to create a data frame
+        5. execute Hive percentile() SQL function
+         */
+        JavaRDD<Row> resultOfTrialsRows = resultOfTrials.map(x -> RowFactory.create(Math.round(x * 100)));
+        StructType schema = DataTypes.createStructType(new StructField[]{DataTypes.createStructField("changePct", DataTypes.IntegerType, false)});
+        DataFrame resultOfTrialsDF = sqlContext.createDataFrame(resultOfTrialsRows, schema);
+        resultOfTrialsDF.registerTempTable("results");
+        List<Row> percentilesRow = sqlContext.sql("select percentile(changePct, array(0.05,0.50,0.95)) from results").collectAsList();
 
-        return result;
+        float worstCase = new Float(percentilesRow.get(0).getList(0).get(0).toString());
+        float mostLikely = new Float(percentilesRow.get(0).getList(0).get(1).toString());
+        float bestCase = new Float(percentilesRow.get(0).getList(0).get(2).toString());
+
+        System.out.println("In a single day, this is what could happen to your stock holdings if you have $1,000 invested");
+        System.out.println(String.format("%25s %7s %7s", "", "$", "%"));
+        System.out.println(String.format("%25s %7d %7d%%", "worst case", Math.round(10 * worstCase), Math.round(worstCase)));
+        System.out.println(String.format("%25s %7d %7d%%", "most likely scenario", Math.round(10 * mostLikely), Math.round(mostLikely)));
+        System.out.println(String.format("%25s %7d %7d%%", "best case", Math.round(10 * bestCase), Math.round(bestCase)));
+
+        return worstCase / 100;
     }
 }
