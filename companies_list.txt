@@ -1,6 +1,5 @@
 Symbol,Weight or dollar amount (must include $)
-GLD,$88
-IBB,$110
-IXC,$44
-SCHR,$569
-VWO,$189
+GE,$250
+AAPL,$250
+GS,$250
+OIL,$250

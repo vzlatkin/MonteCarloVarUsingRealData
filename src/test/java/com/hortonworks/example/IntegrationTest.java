@@ -17,7 +17,6 @@ public class IntegrationTest {
             System.setProperty("hadoop.home.dir", new File("windows_libs\\2.4.0.0").getAbsolutePath());
         }
         System.setProperty("spark.master", "local");
-
         m = new Main();
     }
 
@@ -28,7 +27,7 @@ public class IntegrationTest {
      */
     public void test_1() throws Exception {
 
-        m.run(new String[]{new File("companies_list.txt").toURI().getPath(),"hdfs://node1.vzlatkin.com/tmp/stockData/*.csv"});
+        m.run(new String[]{new File("companies_list.txt").toURI().getPath(), "hdfs://sandbox.hortonworks.com/tmp/stockData/*.csv"});
     }
 
 }

@@ -20,7 +20,6 @@ import java.util.Map;
 
 /**
  * TODO
- * calculate  average price change per stock
  * add functions
  * add a start and stop timer for benchmarking
  * add kryo serializer
@@ -80,7 +79,6 @@ public class Main {
         Long totalInvestement;
         if (symbolsAndWeightsRDD.first()._2().contains("$")) {
             JavaPairRDD<String, Float> symbolsAndDollarsRDD = symbolsAndWeightsRDD.mapToPair(x -> new Tuple2<>(x._1(), new Float(x._2().replaceAll("\\$", ""))));
-            //using multiple variables avoids Spark trying to ship the entire Main class to the executers
             totalInvestement = symbolsAndDollarsRDD.reduce((x, y) -> new Tuple2<>("total", x._2() + y._2()))._2().longValue();
             symbolsAndWeights = symbolsAndDollarsRDD.mapToPair(x -> new Tuple2<>(x._1(), x._2() / totalInvestement)).collectAsMap();
         } else {
