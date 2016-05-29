@@ -52,7 +52,7 @@ done
 wait
 
 touch $t/_SUCCESS
-
+hdfs dfs -rm -R -skipTrash "$destinationDir"
 hdfs dfs -mkdir -p "$destinationDir" && hdfs dfs -put -f $t/* "$destinationDir"; hdfs dfs -put -f companies_list.txt "$destinationDir"
 rm -fr "$t"
 echo Saved to $destinationDir

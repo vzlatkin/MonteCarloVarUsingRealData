@@ -1,6 +1,3 @@
 Symbol,Weight or dollar amount (must include $)
-GLD,$88
-IBB,$110
-IXC,$44
-SCHR,$569
-VWO,$189
+BPL,$1600.00
+AAPL,$400.00

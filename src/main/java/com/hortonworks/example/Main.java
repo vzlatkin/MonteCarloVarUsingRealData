@@ -21,11 +21,9 @@ import java.util.Map;
 /**
  * TODO
  * calculate  average price change per stock
- * run the same algorithm in R
  * add functions
  * add a start and stop timer for benchmarking
  * add kryo serializer
- * add broadcast code
  */
 public class Main {
 
@@ -66,18 +64,33 @@ public class Main {
 
         /*
         read a list of stock symbols and their weights in the portfolio, then transform into a Map<Symbol,Weight>
+        1. read in the data, ignoring header
+        2. convert dollar amounts to fractions
+        3. create a local map
         */
         JavaRDD<String> filteredFileRDD = sc.textFile(listOfCompanies).filter(s -> !s.startsWith("#") && !s.trim().isEmpty());
-        JavaPairRDD<String, Float> symbolsAndWeightsRDD = filteredFileRDD.filter(s -> !s.startsWith("Symbol")).mapToPair(s ->
+        JavaPairRDD<String, String> symbolsAndWeightsRDD = filteredFileRDD.filter(s -> !s.startsWith("Symbol")).mapToPair(s ->
         {
             String[] splits = s.split(",", -2);
-            return new Tuple2<>(splits[0], new Float(splits[1]));
+            return new Tuple2<>(splits[0], splits[1]);
         });
-        Map<String, Float> symbolsAndWeights = symbolsAndWeightsRDD.collectAsMap();
+
+        //convert from $ to % weight in portfolio
+        Map<String, Float> symbolsAndWeights;
+        Long totalInvestement;
+        if (symbolsAndWeightsRDD.first()._2().contains("$")) {
+            JavaPairRDD<String, Float> symbolsAndDollarsRDD = symbolsAndWeightsRDD.mapToPair(x -> new Tuple2<>(x._1(), new Float(x._2().replaceAll("\\$", ""))));
+            //using multiple variables avoids Spark trying to ship the entire Main class to the executers
+            totalInvestement = symbolsAndDollarsRDD.reduce((x, y) -> new Tuple2<>("total", x._2() + y._2()))._2().longValue();
+            symbolsAndWeights = symbolsAndDollarsRDD.mapToPair(x -> new Tuple2<>(x._1(), x._2() / totalInvestement)).collectAsMap();
+        } else {
+            totalInvestement = 1000L;
+            symbolsAndWeights = symbolsAndWeightsRDD.mapToPair(x -> new Tuple2<>(x._1(), new Float(x._2()))).collectAsMap();
+        }
 
         //debug
-        //System.out.println("companies and their weights in the overall portfolio");
-        //symbolsAndWeightsRDD.take(10).forEach(t -> System.out.println("s:" + t._1() + " w: " + t._2()));
+//        System.out.println("symbolsAndWeights");
+//        symbolsAndWeights.forEach((s, f) -> System.out.println("symbol: " + s + ", % of portfolio: " + f));
 
         /*
         read all stock trading data, and transform
@@ -126,7 +139,7 @@ public class Main {
         2. sum(stock weight in overall portfolio * change in price on that date)
          */
         double fraction = 1.0 * NUM_TRIALS / numEvents;
-        JavaRDD<Float> resultOfTrials = filterdDatesToSymbolsAndChangeRDD.sample(true, fraction).map(i -> {
+        JavaPairRDD<String, Float> resultOfTrials = filterdDatesToSymbolsAndChangeRDD.sample(true, fraction).mapToPair(i -> {
             Float total = 0f;
             for (Tuple2 t : i._2()) {
                 String symbol = t._1().toString();
@@ -135,10 +148,11 @@ public class Main {
 
                 total += changeInPrice * weight;
                 //debug
-//                System.out.println(symbol + " with weight " + weight + " changed by " + changeInPrice
+//                System.out.println("on " + i._1() + " " + symbol + " with weight " + weight + " changed by " + changeInPrice
 //                        + " for a total of " + total);
             }
-            return total;
+//            System.out.println("Total % change on " + i._1() + " was " + total);
+            return new Tuple2<>(i._1(), total);
         });
         //debug
         //System.out.println("fraction: " + fraction);
@@ -154,22 +168,23 @@ public class Main {
         4. Use that schema to create a data frame
         5. execute Hive percentile() SQL function
          */
-        JavaRDD<Row> resultOfTrialsRows = resultOfTrials.map(x -> RowFactory.create(Math.round(x * 100)));
-        StructType schema = DataTypes.createStructType(new StructField[]{DataTypes.createStructField("changePct", DataTypes.IntegerType, false)});
+        JavaRDD<Row> resultOfTrialsRows = resultOfTrials.map(x -> RowFactory.create(x._1(), Math.round(x._2() * 100)));
+        StructType schema = DataTypes.createStructType(new StructField[]{DataTypes.createStructField("date", DataTypes.StringType, false), DataTypes.createStructField("changePct", DataTypes.IntegerType, false)});
         DataFrame resultOfTrialsDF = sqlContext.createDataFrame(resultOfTrialsRows, schema);
         resultOfTrialsDF.registerTempTable("results");
         List<Row> percentilesRow = sqlContext.sql("select percentile(changePct, array(0.05,0.50,0.95)) from results").collectAsList();
 
-        float worstCase = new Float(percentilesRow.get(0).getList(0).get(0).toString());
-        float mostLikely = new Float(percentilesRow.get(0).getList(0).get(1).toString());
-        float bestCase = new Float(percentilesRow.get(0).getList(0).get(2).toString());
+//        System.out.println(sqlContext.sql("select * from results order by changePct").collectAsList());
+        float worstCase = new Float(percentilesRow.get(0).getList(0).get(0).toString()) / 100;
+        float mostLikely = new Float(percentilesRow.get(0).getList(0).get(1).toString()) / 100;
+        float bestCase = new Float(percentilesRow.get(0).getList(0).get(2).toString()) / 100;
 
-        System.out.println("In a single day, this is what could happen to your stock holdings if you have $1,000 invested");
+        System.out.println("In a single day, this is what could happen to your stock holdings if you have $" + totalInvestement + " invested");
         System.out.println(String.format("%25s %7s %7s", "", "$", "%"));
-        System.out.println(String.format("%25s %7d %7d%%", "worst case", Math.round(10 * worstCase), Math.round(worstCase)));
-        System.out.println(String.format("%25s %7d %7d%%", "most likely scenario", Math.round(10 * mostLikely), Math.round(mostLikely)));
-        System.out.println(String.format("%25s %7d %7d%%", "best case", Math.round(10 * bestCase), Math.round(bestCase)));
+        System.out.println(String.format("%25s %7d %7.2f%%", "worst case", Math.round(totalInvestement * worstCase / 100), worstCase));
+        System.out.println(String.format("%25s %7d %7.2f%%", "most likely scenario", Math.round(totalInvestement * mostLikely / 100), mostLikely));
+        System.out.println(String.format("%25s %7d %7.2f%%", "best case", Math.round(totalInvestement * bestCase / 100), bestCase));
 
-        return worstCase / 100;
+        return worstCase;
     }
 }

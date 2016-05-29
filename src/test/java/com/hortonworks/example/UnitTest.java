@@ -159,4 +159,32 @@ public class UnitTest {
         Object r = m.run(new String[]{UnitTest.class.getClassLoader().getResource("companies_list_test_3.txt").toURI().getPath(), "hdfs://localhost:20112/tmp/stockData/*.csv"});
         Assert.assertEquals("var simulation gave the wrong answer", "No trade data", r);
     }
+
+    @Test
+    /*
+    tests that $ amounts can be read from companies.txt instead of % weights
+     */
+    public void test_5() throws Exception {
+
+        FSDataOutputStream writer = hdfsFsHandle.create(new Path("/tmp/stockData/BPL.csv"));
+        writer.writeUTF("Date,Open,High,Low,Close,Volume,Adj Close,Symbol,Change_Pct\n" +
+                "1990-01-02,x,x,x,x,x,x,BPL,1\n" +
+                "1990-01-03,x,x,x,x,x,x,BPL,1\n" +
+                "1990-01-04,x,x,x,x,x,x,BPL,1\n" +
+                "1990-01-05,x,x,x,x,x,x,BPL,1\n" +
+                "1990-01-06,x,x,x,x,x,x,BPL,1\n");
+        writer.close();
+
+        writer = hdfsFsHandle.create(new Path("/tmp/stockData/AAPL.csv"));
+        writer.writeUTF("Date,Open,High,Low,Close,Volume,Adj Close,Symbol,Change_Pct\n" +
+                "1990-01-02,x,x,x,x,x,x,AAPL,4\n" +
+                "1990-01-03,x,x,x,x,x,x,AAPL,4\n" +
+                "1990-01-04,x,x,x,x,x,x,AAPL,4\n" +
+                "1990-01-05,x,x,x,x,x,x,AAPL,4\n" +
+                "1990-01-06,x,x,x,x,x,x,AAPL,4\n");
+        writer.close();
+
+        Object r = m.run(new String[]{UnitTest.class.getClassLoader().getResource("companies_list_test_5.txt").toURI().getPath(), "hdfs://localhost:20112/tmp/stockData/*.csv"});
+        Assert.assertEquals("var simulation gave the wrong answer", 1.6, (Float) r, 0.001);
+    }
 }
